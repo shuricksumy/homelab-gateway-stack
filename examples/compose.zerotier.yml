@@ -1,0 +1,87 @@
+# Optional third path: your own ZeroTier network controller (ZTNET web UI + PostgreSQL) whose
+# controller also joins the network as a member, so Traefik can route ZT_SUBNET through it.
+# Based on ZTNET's documented compose (ztnet.network); pin the versions you deploy.
+#
+# Add to COMPOSE_FILE in .env, then docs/deploy.md phase 9. Uses about 300 MB of RAM more:
+# on a 1 GB server, leave this part out.
+
+networks:
+  ztnet: # controller, web UI and database; the web UI is reached through Traefik
+    ipam:
+      config:
+        - subnet: 172.31.255.0/29
+
+x-logging: &logging
+  logging:
+    driver: json-file
+    options: {max-size: "15m", max-file: "3"}
+
+services:
+  ztnet-postgres:
+    <<: *logging
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ztnet
+      POSTGRES_PASSWORD: ${ZTNET_POSTGRES_PASSWORD:?set ZTNET_POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ztnet
+    volumes:
+      - ./data/zerotier/postgres:/var/lib/postgresql/data
+    networks: [ztnet]
+
+  zerotier: # the controller, and a member of its own network (the gateway's ZeroTier address)
+    <<: *logging
+    image: zyclonite/zerotier:1.14.2
+    hostname: zerotier
+    restart: unless-stopped
+    cap_add: [NET_ADMIN, SYS_ADMIN]
+    devices: [/dev/net/tun]
+    sysctls:
+      net.ipv4.ip_forward: "1" # forwards Traefik's requests into the ZeroTier network
+    environment:
+      ZT_OVERRIDE_LOCAL_CONF: "true"
+      ZT_ALLOW_MANAGEMENT_FROM: 172.31.255.0/29 # ZTNET only
+    ports:
+      - "9993:9993/udp" # ZeroTier's own port; open it in the cloud firewall
+    volumes:
+      - ./data/zerotier/zerotier-one:/var/lib/zerotier-one
+    networks:
+      ztnet:
+        ipv4_address: 172.31.255.1
+      edge:
+        ipv4_address: ${IP_ZEROTIER:?set IP_ZEROTIER in .env} # Traefik's route to ZT_SUBNET
+
+  zerotier-nat: # NAT into the ZeroTier network (scripts/tunnel-nat.sh explains why)
+    <<: *logging
+    image: alpine:3.22
+    restart: unless-stopped
+    network_mode: service:zerotier
+    cap_add: [NET_ADMIN]
+    environment:
+      OUT_IFACE: zt+
+      FROM: ${EDGE_SUBNET}
+    command: ["sh", "/scripts/tunnel-nat.sh"]
+    volumes:
+      - ./scripts/tunnel-nat.sh:/scripts/tunnel-nat.sh:ro
+    depends_on: [zerotier]
+
+  ztnet: # web UI for the controller: VPN-only through Traefik (traefik/optional/zerotier.yml)
+    <<: *logging
+    image: sinamics/ztnet:latest # pin the current release
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: ztnet-postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ztnet
+      POSTGRES_PASSWORD: ${ZTNET_POSTGRES_PASSWORD}
+      POSTGRES_DB: ztnet
+      NEXTAUTH_URL: https://zt.${DOMAIN}:8443
+      NEXTAUTH_URL_INTERNAL: http://ztnet:3000
+      NEXTAUTH_SECRET: ${ZTNET_NEXTAUTH_SECRET:?set ZTNET_NEXTAUTH_SECRET in .env}
+    volumes:
+      - ./data/zerotier/zerotier-one:/var/lib/zerotier-one # reads the controller's auth token
+    networks:
+      ztnet:
+        ipv4_address: 172.31.255.2
+      edge: {}
+    depends_on: [ztnet-postgres, zerotier]

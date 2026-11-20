@@ -1,0 +1,22 @@
+# The home server's Tailscale node, joined to the gateway's Headscale. Runs on the home machine.
+# It reaches out only; nothing is published. host network: services on this machine answer on
+# its 100.64 address as on any other.
+#
+#   TS_AUTHKEY=... docker compose -f compose.tailscale.yml up -d
+#   (key: on the gateway, headscale preauthkeys create --user <id> --expiration 1h)
+services:
+  tailscale:
+    image: tailscale/tailscale:v1.84.0
+    hostname: home
+    restart: unless-stopped
+    network_mode: host
+    cap_add: [NET_ADMIN, NET_RAW]
+    devices: [/dev/net/tun]
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:-}
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "false"
+      TS_ACCEPT_DNS: "false" # keep the home DNS
+      TS_EXTRA_ARGS: --login-server=https://hs.example.com
+    volumes:
+      - ./tailscale-state:/var/lib/tailscale

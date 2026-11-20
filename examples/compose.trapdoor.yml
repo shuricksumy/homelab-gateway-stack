@@ -1,0 +1,105 @@
+# trapdoor (github.com/shuricksumy/trapdoor): WireGuard / AmneziaWG / OpenVPN servers with a
+# web UI. Two jobs here: the home server is a WireGuard client (Traefik reaches home through
+# it), and so are your phones and laptops (how you reach the admin pages).
+#
+# Add to COMPOSE_FILE in .env, then:
+#   mkdir -p data/trapdoor/{openvpn,wireguard,amneziawg,web} && sudo chown 10001:10001 data/trapdoor/web
+#   docker compose up -d && docker compose exec -it trapdoor-web trapdoor user add admin
+# The web UI is at https://vpn.example.com:8443 over the VPN (admin.yml). Until your first
+# device is connected, reach it with: ssh -L 8080:127.0.0.1:8080 you@server (WEB_BIND below).
+
+x-trapdoor: &trapdoor
+  image: ${TD_IMAGE:-ghcr.io/shuricksumy/trapdoor:0.4}
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: {max-size: "15m", max-file: "3"}
+
+services:
+  trapdoor-vpn:
+    <<: *trapdoor
+    user: root
+    entrypoint: ["vpn-entrypoint.sh"]
+    cap_add: [NET_ADMIN]
+    devices: [/dev/net/tun]
+    sysctls:
+      - net.ipv4.ip_forward=1
+    environment:
+      VPN_NAT_SUBNET: auto # VPN clients reach the internet through this server
+    ports:
+      - "${WG_PORT:-51820}:${WG_PORT:-51820}/udp"
+      - "${OVPN_PORT:-1194}:1194/udp" # only if you add an OpenVPN server
+    volumes:
+      - ./data/trapdoor/openvpn:/etc/openvpn
+      - ./data/trapdoor/wireguard:/etc/wireguard # also wg0.up.sh / wg0.down.sh (NAT into the tunnel)
+      - ./data/trapdoor/amneziawg:/etc/amnezia/amneziawg
+    networks:
+      default:
+        gw_priority: 1 # internet traffic of VPN clients leaves here (Compose 2.33+)
+      edge:
+        ipv4_address: ${IP_VPN_WG:?set IP_VPN_WG in .env} # Traefik's routes point here
+
+  trapdoor-agent:
+    <<: *trapdoor
+    user: root
+    command: ["agent"]
+    network_mode: service:trapdoor-vpn
+    depends_on: [trapdoor-vpn]
+    environment:
+      TD_AGENT_TOKEN: ${TD_AGENT_TOKEN:?set TD_AGENT_TOKEN in .env}
+      TD_AGENT_LISTEN: unix:/run/trapdoor/agent.sock
+      TD_AGENT_SOCKET_GID: "10001"
+      TD_OPENVPN_MGMT: 127.0.0.1:2080
+      TD_OPENVPN_RESTART: SIGTERM
+      TD_FIREWALL: file
+      TD_WIREGUARD: file
+      TD_SCRIPTS: "off" # "on" lets the web UI edit the start / stop scripts (run as root)
+      TD_CONTAINER_OPENVPN: trapdoor-vpn
+      TD_CONTAINER_WIREGUARD: trapdoor-vpn
+      TD_CONTAINER_AMNEZIAWG: trapdoor-vpn
+      TD_MACHINE: gateway
+      TD_NODE_NAME: edge
+      TD_SETUP_PORT: "1194"
+      TD_SETUP_PROTO: udp
+      TD_SETUP_PUBLIC_PORT: ${OVPN_PORT:-1194}
+    volumes:
+      - ./data/trapdoor/openvpn:/etc/openvpn
+      - ./data/trapdoor/wireguard:/etc/wireguard
+      - ./data/trapdoor/amneziawg:/etc/amnezia/amneziawg
+      - trapdoor-run:/run/trapdoor
+    healthcheck:
+      test: ["CMD", "trapdoor", "health", "unix:/run/trapdoor/agent.sock"]
+      interval: 30s
+      timeout: 5s
+      start_period: 5s
+
+  trapdoor-web:
+    <<: *trapdoor
+    command: ["web"]
+    depends_on: [trapdoor-agent]
+    environment:
+      TD_AGENT_TOKEN: ${TD_AGENT_TOKEN}
+      TD_AGENT_URL: unix:/run/trapdoor/agent.sock
+      TD_TZ: ${TZ:-UTC}
+      TD_COOKIE_SECURE: "true"
+      TD_TRUSTED_PROXIES: ${IP_TRAEFIK}/32 # only Traefik may set X-Forwarded-For
+      TD_PUBLIC_URL: https://vpn.${DOMAIN}:8443
+      TD_FRAME_ANCESTORS: https://start.${DOMAIN} # shown inside foyer
+      TD_BACKUP_PASSPHRASE: ${TD_BACKUP_PASSPHRASE:-}
+    ports:
+      - "127.0.0.1:8080:8080" # loopback only: the first login through an SSH tunnel
+    volumes:
+      - ./data/trapdoor/web:/data # owned by uid 10001
+      - trapdoor-run:/run/trapdoor
+    networks: [edge]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "trapdoor", "health", "http://127.0.0.1:8080"]
+      interval: 30s
+      timeout: 5s
+      start_period: 5s
+
+volumes:
+  trapdoor-run: {}

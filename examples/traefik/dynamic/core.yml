@@ -1,0 +1,33 @@
+# The login portal, the Authelia configurator, and the middlewares every other file uses.
+# Edit by hand; Traefik Manager only edits routes.yml. Replace example.com with your DOMAIN.
+http:
+  routers:
+    authelia: # the login portal: public, it is where everyone signs in
+      rule: Host(`auth.example.com`)
+      entryPoints: [websecure]
+      service: authelia
+      tls: {certResolver: le}
+
+    configurator: # VPN-only entry point + allow-list + Authelia (admin group, 2FA)
+      rule: Host(`authcfg.example.com`)
+      entryPoints: [internal]
+      service: configurator
+      middlewares: [vpn-only, authelia]
+      tls: {certResolver: le}
+
+  middlewares:
+    authelia: # ask Authelia before every request; its answer headers overwrite any client copy
+      forwardAuth:
+        address: http://authelia:9091/api/authz/forward-auth
+        trustForwardHeader: true
+        authResponseHeaders: [Remote-User, Remote-Groups, Remote-Email, Remote-Name]
+
+    vpn-only: # second lock for admin pages: the internal entry point is VPN-only already
+      ipAllowList:
+        # VPN_CIDRS from .env. VPN clients reach Traefik without NAT, so this is their own
+        # address. Test it from an address that must be refused.
+        sourceRange: ["10.8.10.0/24", "10.8.1.0/24", "100.64.0.0/10"]
+
+  services:
+    authelia: {loadBalancer: {servers: [{url: "http://authelia:9091"}]}}
+    configurator: {loadBalancer: {servers: [{url: "http://configurator:8080"}]}}

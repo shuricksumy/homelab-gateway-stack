@@ -1,0 +1,34 @@
+# Phase 6: copy to traefik/dynamic/ together with the static-config changes in traefik.yml
+# (entry point middlewares + plugins). From authelia-webui's examples/hardening/security.yml;
+# its docs/hardening.md explains every line.
+#
+# realip: FIRST in the entry point's middlewares. With a CDN in front, it reduces
+#   X-Forwarded-For to the real client; without one it only sanitizes the header. Authelia reads
+#   the leftmost X-Forwarded-For, so never trust a CDN's ranges without it.
+# crowdsec: enforces CrowdSec's bans on every router of the entry point.
+http:
+  middlewares:
+    realip:
+      plugin:
+        realip:
+          trustedIPs: &cdn
+            - 192.0.2.0/24 # PLACEHOLDER: your CDN's ranges, or leave it (no CDN)
+
+    crowdsec:
+      plugin:
+        bouncer:
+          enabled: true
+          logLevel: INFO
+          crowdsecMode: stream # banned addresses cached here, refreshed every 60 s
+          crowdsecLapiScheme: http
+          crowdsecLapiHost: crowdsec:8080
+          crowdsecLapiKeyFile: /etc/traefik/crowdsec-bouncer.key # root-owned, mode 600
+          updateMaxFailure: -1 # CrowdSec down: let traffic through instead of blocking everyone
+          forwardedHeadersTrustedIPs: *cdn
+          clientTrustedIPs: # never banned: your VPN ranges, the home LAN, Docker networks
+            - 127.0.0.1/32
+            - 10.8.10.0/24
+            - 10.8.1.0/24
+            - 100.64.0.0/10
+            - 192.168.1.0/24
+            - 172.30.0.0/24

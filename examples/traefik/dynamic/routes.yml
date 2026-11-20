@@ -1,0 +1,50 @@
+# Your home services. Traefik Manager edits this file (phase 7); you can too.
+#
+# Each service has two paths home, with a health check on each:
+#   <name>-ts  over Tailscale  (the home server's Tailscale address, 100.64.0.10)
+#   <name>-wg  over WireGuard  (the home server's trapdoor address,   10.8.10.10)
+# `failover` uses the first while its health check passes and switches to the second when it
+# fails, then back. Swap service and fallback to prefer WireGuard. With one tunnel only, point
+# the router at <name>-wg (or -ts) directly and delete the failover service.
+# docs/tunnels.md explains the routes and NAT that make these addresses reachable.
+http:
+  routers:
+    home: # Home Assistant
+      rule: Host(`home.example.com`)
+      entryPoints: [websecure]
+      service: home
+      # No Authelia here on purpose: the Home Assistant apps talk to its API directly and
+      # cannot pass a login page. Home Assistant's own login (with 2FA) and CrowdSec protect it.
+      tls: {certResolver: le}
+
+    photos: # Immich (or any app): behind Authelia
+      rule: Host(`photos.example.com`)
+      entryPoints: [websecure]
+      service: photos
+      middlewares: [authelia]
+      tls: {certResolver: le}
+
+  services:
+    home:
+      failover: {service: home-ts, fallback: home-wg}
+    home-ts:
+      loadBalancer:
+        servers: [{url: "http://100.64.0.10:8123"}]
+        healthCheck: {path: /manifest.json, interval: 15s, timeout: 3s}
+    home-wg:
+      loadBalancer:
+        servers: [{url: "http://10.8.10.10:8123"}]
+        healthCheck: {path: /manifest.json, interval: 15s, timeout: 3s}
+
+    photos:
+      failover: {service: photos-ts, fallback: photos-wg}
+    photos-ts:
+      loadBalancer:
+        servers: [{url: "http://100.64.0.10:2283"}]
+        passHostHeader: true
+        healthCheck: {path: /api/server/ping, interval: 15s, timeout: 3s}
+    photos-wg:
+      loadBalancer:
+        servers: [{url: "http://10.8.10.10:2283"}]
+        passHostHeader: true
+        healthCheck: {path: /api/server/ping, interval: 15s, timeout: 3s}

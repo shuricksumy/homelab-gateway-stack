@@ -1,0 +1,74 @@
+# The second tunnel: Headscale (your own Tailscale control server), Headplane (its web UI) and
+# a Tailscale node on this server. The home server joins the same tailnet; Traefik reaches it
+# at its 100.64.x address through the node (routes.sh), with WireGuard as the fallback.
+#
+# Add to COMPOSE_FILE in .env, then docs/deploy.md phase 5:
+#   cp traefik/optional/headscale.yml traefik/dynamic/
+#   mkdir -p data/headscale data/headplane data/tailscale
+#   docker compose up -d headscale headplane
+#   docker compose exec headscale headscale users create gateway
+#   docker compose exec headscale headscale preauthkeys create --user <id> --expiration 1h
+#   # put the key in .env as TS_AUTHKEY, then:
+#   docker compose up -d tailscale tailscale-nat
+
+x-logging: &logging
+  logging:
+    driver: json-file
+    options: {max-size: "15m", max-file: "3"}
+
+services:
+  headscale:
+    <<: *logging
+    image: headscale/headscale:${HEADSCALE_VERSION:?set HEADSCALE_VERSION in .env}
+    restart: unless-stopped
+    command: ["serve"]
+    volumes:
+      - ./headscale/config.yaml:/etc/headscale/config.yaml:ro
+      - ./data/headscale:/var/lib/headscale # database, noise key
+    networks: [edge] # public through Traefik (hs.example.com); no published ports
+
+  headplane:
+    <<: *logging
+    image: ghcr.io/tale/headplane:${HEADPLANE_VERSION:?set HEADPLANE_VERSION in .env}
+    restart: unless-stopped
+    volumes:
+      - ./headplane/config.yaml:/etc/headplane/config.yaml:ro
+      - ./headscale/config.yaml:/etc/headscale/config.yaml:ro # read to show the settings
+      - ./data/headplane:/var/lib/headplane
+    networks: [edge] # VPN-only through Traefik (hs.example.com/admin on :8443)
+    depends_on: [headscale]
+
+  tailscale: # this server's node in the tailnet
+    <<: *logging
+    image: tailscale/tailscale:${TAILSCALE_VERSION:?set TAILSCALE_VERSION in .env}
+    hostname: gateway
+    restart: unless-stopped
+    cap_add: [NET_ADMIN, NET_RAW]
+    devices: [/dev/net/tun]
+    sysctls:
+      net.ipv4.ip_forward: "1" # forwards Traefik's requests into the tailnet
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:-} # only for the first login; the state keeps it logged in
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "false" # a real tailscale0 interface, so it can route for Traefik
+      TS_ACCEPT_DNS: "false"
+      TS_EXTRA_ARGS: --login-server=https://hs.${DOMAIN}
+    volumes:
+      - ./data/tailscale:/var/lib/tailscale
+    networks:
+      edge:
+        ipv4_address: ${IP_TAILSCALE:?set IP_TAILSCALE in .env} # Traefik's route to 100.64.0.0/10
+
+  tailscale-nat: # NAT into the tailnet (scripts/tunnel-nat.sh explains why)
+    <<: *logging
+    image: alpine:3.22
+    restart: unless-stopped
+    network_mode: service:tailscale
+    cap_add: [NET_ADMIN]
+    environment:
+      OUT_IFACE: tailscale0
+      FROM: ${EDGE_SUBNET}
+    command: ["sh", "/scripts/tunnel-nat.sh"]
+    volumes:
+      - ./scripts/tunnel-nat.sh:/scripts/tunnel-nat.sh:ro
+    depends_on: [tailscale]

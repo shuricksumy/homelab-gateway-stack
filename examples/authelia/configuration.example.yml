@@ -1,0 +1,89 @@
+# Authelia main configuration. From authelia-webui's examples/production (its README shows how to
+# generate every __CHANGE_ME_...__ value with the authelia binary). Copy to configuration.yml.
+# Keep this file mode 600: it holds secrets. The configurator mounts it read-only.
+#
+# access_control, OIDC clients, users and the OIDC signing keys are NOT here: they live in managed/
+# and are edited through the configurator (see X_AUTHELIA_CONFIG in compose.yml). Authelia reads
+# every file through its template filter: never write two opening curly braces in a row here,
+# not even in a comment (Authelia would read them as a template).
+
+theme: auto
+
+server:
+  address: 'tcp://0.0.0.0:9091/'
+
+log:
+  level: info
+  format: json
+  file_path: /config/logs/authelia.log # read by the configurator's Logs page; rotate it on the host
+  keep_stdout: true
+
+totp:
+  issuer: example.com
+
+identity_validation:
+  reset_password:
+    jwt_secret: '__CHANGE_ME_jwt_secret__'
+
+authentication_backend:
+  file:
+    path: /config/managed/users.yml # managed: the configurator edits users (no restart needed)
+    watch: true
+    search:
+      email: true
+    password:
+      algorithm: argon2
+      argon2:
+        variant: argon2id
+        iterations: 3
+        memory: 65536
+        parallelism: 4
+        key_length: 32
+        salt_length: 16
+
+password_policy:
+  standard:
+    enabled: true
+    min_length: 12
+    require_uppercase: true
+    require_lowercase: true
+    require_number: true
+    require_special: true
+
+session:
+  secret: '__CHANGE_ME_session_secret__'
+  cookies:
+    - domain: 'example.com'
+      authelia_url: 'https://auth.example.com'
+      default_redirection_url: 'https://start.example.com:8443'
+  # Sessions in Redis: every apply restarts Authelia, and nobody is signed out by it.
+  # The password comes from AUTHELIA_SESSION_REDIS_PASSWORD (compose.yml / .env).
+  redis:
+    host: redis
+    port: 6379
+
+regulation:
+  max_retries: 3
+  find_time: 2m
+  ban_time: 10m
+
+storage:
+  encryption_key: '__CHANGE_ME_storage_encryption_key__'
+  local:
+    path: /config/db.sqlite3
+
+notifier:
+  # Password resets and 2FA registration send emails. For production use SMTP:
+  # smtp:
+  #   address: 'submissions://smtp.example.com:465'
+  #   username: 'authelia@example.com'
+  #   password: '__CHANGE_ME_smtp_password__'
+  #   sender: 'Authelia <authelia@example.com>'
+  filesystem:
+    filename: /config/notification.txt
+
+identity_providers:
+  oidc:
+    hmac_secret: '__CHANGE_ME_oidc_hmac_secret__'
+    # The signing keys (jwks) are in managed/oidc_jwks.yml, their private keys in
+    # managed/secrets/jwks/ (README.md, step 1). The configurator rotates them on its Keys page.

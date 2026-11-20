@@ -1,0 +1,58 @@
+# Keeps the example deployable: every compose combination parses, and the docs link to files
+# that exist.
+name: Check
+
+on:
+  push: {branches: [main]}
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with: {persist-credentials: false}
+      - name: Every compose combination parses
+        working-directory: examples
+        run: |
+          # .env.example with dummy secrets
+          sed -E 's/^([A-Z_]+(KEY|PASSWORD|SECRET|TOKEN))=[[:space:]]*(#.*)?$/\1=x/; s/^COMPOSE_FILE=.*//' .env.example > /tmp/env
+          for set in \
+            compose.yml \
+            compose.yml:compose.trapdoor.yml \
+            compose.yml:compose.trapdoor.yml:compose.headscale.yml \
+            compose.yml:compose.trapdoor.yml:compose.headscale.yml:compose.crowdsec.yml \
+            compose.yml:compose.trapdoor.yml:compose.headscale.yml:compose.crowdsec.yml:compose.traefik-manager.yml \
+            compose.yml:compose.trapdoor.yml:compose.headscale.yml:compose.crowdsec.yml:compose.traefik-manager.yml:compose.zerotier.yml
+          do
+            echo "== $set"
+            COMPOSE_FILE=$set docker compose --env-file /tmp/env config -q
+          done
+          docker compose -f home/compose.tailscale.yml config -q
+      - name: Shell scripts
+        run: shellcheck examples/traefik/routes.sh examples/scripts/tunnel-nat.sh examples/trapdoor/*.sh
+
+  links:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with: {persist-credentials: false}
+      - name: Relative links point at files that exist
+        run: |
+          python3 - <<'PY'
+          import re, os, glob, sys
+          bad = 0
+          for f in glob.glob('**/*.md', recursive=True):
+              for m in re.finditer(r'\]\(([^)\s]+)\)', open(f).read()):
+                  u = m.group(1)
+                  if u.startswith(('http', '#', 'mailto')):
+                      continue
+                  p = os.path.normpath(os.path.join(os.path.dirname(f), u.split('#')[0]))
+                  if not os.path.exists(p):
+                      print(f"{f}: broken link {u}")
+                      bad += 1
+          sys.exit(1 if bad else 0)
+          PY

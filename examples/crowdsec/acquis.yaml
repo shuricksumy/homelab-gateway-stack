@@ -1,0 +1,10 @@
+# CrowdSec log sources (paths inside the container, see compose.crowdsec.yml).
+filenames:
+  - /var/log/traefik/access.log
+labels:
+  type: traefik
+---
+filenames:
+  - /var/log/authelia/authelia.log
+labels:
+  type: authelia

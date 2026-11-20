@@ -1,0 +1,5 @@
+# Written when you run the example stack: secrets, state, certificates, logs.
+examples/.env
+examples/data/
+examples/**/*.key
+examples/letsencrypt/

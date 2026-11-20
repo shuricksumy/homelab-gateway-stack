@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 300" font-family="-apple-system, 'Segoe UI', 'Inter', Helvetica, Arial, sans-serif">
+  <title>From one profile to a running gateway</title>
+  <defs>
+    <linearGradient id="bg2" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#0f1b2d"/>
+      <stop offset="1" stop-color="#0b2a2f"/>
+    </linearGradient>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0 0 10 5 0 10z" fill="#5eead4"/>
+    </marker>
+    <style>
+      .t { fill: #e6eef5; } .m { fill: #9fb6c8; }
+      .n { font-size: 13px; font-weight: 800; fill: #5eead4; letter-spacing: .08em; }
+      .h { font-size: 17px; font-weight: 700; } .s { font-size: 12.5px; }
+      .c { fill: #1b2a3c; stroke: #2c4560; stroke-width: 1.2; }
+      .code { font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; font-size: 12.5px; fill: #fbbf24; }
+    </style>
+  </defs>
+  <rect width="1200" height="300" rx="18" fill="url(#bg2)"/>
+
+  <g transform="translate(30 40)">
+    <rect width="250" height="220" rx="14" class="c"/>
+    <text x="20" y="32" class="n">1 · DESCRIBE</text>
+    <text x="20" y="62" class="t h">gateway.toml</text>
+    <text x="20" y="92" class="m s">domain, public IP</text>
+    <text x="20" y="112" class="m s">which parts run</text>
+    <text x="20" y="132" class="m s">host names, address ranges</text>
+    <text x="20" y="152" class="m s">users and groups</text>
+    <text x="20" y="172" class="m s">home services, their ports</text>
+    <text x="20" y="200" class="code">cp gateway.example.toml …</text>
+  </g>
+  <path d="M286 150h34" stroke="#5eead4" stroke-width="2.4" marker-end="url(#ar)"/>
+
+  <g transform="translate(326 40)">
+    <rect width="270" height="220" rx="14" class="c" stroke="#2f7d6d"/>
+    <text x="20" y="32" class="n">2 · GENERATE</text>
+    <text x="20" y="62" class="t h">./setup.sh</text>
+    <text x="20" y="92" class="m s">secrets, argon2 / bcrypt hashes</text>
+    <text x="20" y="112" class="m s">OIDC signing key</text>
+    <text x="20" y="132" class="m s">Traefik routes, failover, locks</text>
+    <text x="20" y="152" class="m s">Authelia rules, AdGuard DNS</text>
+    <text x="20" y="172" class="m s">Headscale, foyer, compose, .env</text>
+    <text x="20" y="200" class="code">→ deploy/   (safe to run again)</text>
+  </g>
+  <path d="M602 150h34" stroke="#5eead4" stroke-width="2.4" marker-end="url(#ar)"/>
+
+  <g transform="translate(642 40)">
+    <rect width="250" height="220" rx="14" class="c"/>
+    <text x="20" y="32" class="n">3 · START</text>
+    <text x="20" y="62" class="t h">docker compose up -d</text>
+    <text x="20" y="92" class="m s">Traefik + certificates</text>
+    <text x="20" y="112" class="m s">Authelia, configurator</text>
+    <text x="20" y="132" class="m s">trapdoor, Headscale, Tailscale</text>
+    <text x="20" y="152" class="m s">CrowdSec, AdGuard, foyer</text>
+    <text x="20" y="172" class="m s">Traefik Manager</text>
+    <text x="20" y="200" class="code">cd deploy</text>
+  </g>
+  <path d="M898 150h34" stroke="#5eead4" stroke-width="2.4" marker-end="url(#ar)"/>
+
+  <g transform="translate(938 40)">
+    <rect width="232" height="220" rx="14" class="c" stroke="#2f7d6d"/>
+    <text x="20" y="32" class="n">4 · BOOTSTRAP</text>
+    <text x="20" y="62" class="t h">./setup.sh bootstrap</text>
+    <text x="20" y="92" class="m s">trapdoor admin</text>
+    <text x="20" y="112" class="m s">WireGuard server + home client</text>
+    <text x="20" y="132" class="m s">Tailscale node, home key</text>
+    <text x="20" y="152" class="m s">prints every URL and login</text>
+    <text x="20" y="172" class="m s">home/ bundle to copy home</text>
+    <text x="20" y="200" class="code">✓ ready</text>
+  </g>
+</svg>

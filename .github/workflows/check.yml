@@ -1,5 +1,5 @@
-# Keeps the example deployable: every compose combination parses, and the docs link to files
-# that exist.
+# Keeps the stack deployable: the generator runs on the example profile, Authelia validates what
+# it wrote, every compose combination parses, the scripts pass shellcheck, the docs' links work.
 name: Check
 
 on:
@@ -10,44 +10,43 @@ permissions:
   contents: read
 
 jobs:
-  compose:
+  generate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with: {persist-credentials: false}
-      - name: Every compose combination parses
-        working-directory: examples
+      - name: Generate from the example profile (every part on)
+        working-directory: stack
         run: |
-          # .env.example with dummy secrets
-          sed -E 's/^([A-Z_]+(KEY|PASSWORD|SECRET|TOKEN))=[[:space:]]*(#.*)?$/\1=x/; s/^COMPOSE_FILE=.*//' .env.example > /tmp/env
-          for set in \
-            compose.yml \
-            compose.yml:compose.trapdoor.yml \
-            compose.yml:compose.trapdoor.yml:compose.headscale.yml \
-            compose.yml:compose.trapdoor.yml:compose.headscale.yml:compose.crowdsec.yml \
-            compose.yml:compose.trapdoor.yml:compose.headscale.yml:compose.crowdsec.yml:compose.traefik-manager.yml \
-            compose.yml:compose.trapdoor.yml:compose.headscale.yml:compose.crowdsec.yml:compose.traefik-manager.yml:compose.zerotier.yml
-          do
-            echo "== $set"
-            COMPOSE_FILE=$set docker compose --env-file /tmp/env config -q
+          sed -e 's/^challenge    = "dns"/challenge    = "none"/' -e 's/^zerotier        = false/zerotier        = true/' \
+            gateway.example.toml > gateway.toml
+          sudo ./setup.sh
+      - name: Validate (docker compose config, Authelia validate-config)
+        working-directory: stack
+        run: sudo ./setup.sh check
+      - name: Every part on its own
+        working-directory: deploy
+        run: |
+          for part in trapdoor headscale crowdsec traefik-manager adguard foyer zerotier; do
+            echo "== core + $part"
+            sudo env COMPOSE_FILE=compose.core.yml:compose.$part.yml docker compose config -q
           done
-          docker compose -f home/compose.tailscale.yml config -q
       - name: Shell scripts
-        run: shellcheck examples/traefik/routes.sh examples/scripts/tunnel-nat.sh examples/trapdoor/*.sh
+        run: shellcheck stack/setup.sh stack/templates/scripts/*.sh
 
   links:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with: {persist-credentials: false}
-      - name: Relative links point at files that exist
+      - name: Relative links and images point at files that exist
         run: |
           python3 - <<'PY'
           import re, os, glob, sys
           bad = 0
           for f in glob.glob('**/*.md', recursive=True):
-              for m in re.finditer(r'\]\(([^)\s]+)\)', open(f).read()):
-                  u = m.group(1)
+              text = open(f).read()
+              for u in re.findall(r'\]\(([^)\s]+)\)', text) + re.findall(r'src="([^"]+)"', text):
                   if u.startswith(('http', '#', 'mailto')):
                       continue
                   p = os.path.normpath(os.path.join(os.path.dirname(f), u.split('#')[0]))

@@ -2,267 +2,135 @@
 
 <p align="center">
   <b>Your home services on the internet, without opening a single port at home.</b><br>
-  One small cloud server in front. Login with 2FA, automatic bans, VPN tunnels home, and a backup tunnel when the first one drops.
+  One small cloud server in front: login with 2FA, automatic bans, a VPN for your devices,<br>
+  and two tunnels home that take over from each other. Described in one file, set up by one script.
 </p>
 
 <p align="center">
-  <a href="#-the-problem">The problem</a> ·
   <a href="#-what-you-get">What you get</a> ·
-  <a href="#-the-parts">The parts</a> ·
   <a href="#-how-it-fits-together">How it fits</a> ·
-  <a href="#-getting-started">Get started</a> ·
-  <a href="#-things-worth-knowing-before-you-start">Before you start</a>
+  <a href="#-quick-start">Quick start</a> ·
+  <a href="#-what-it-looks-like">Screenshots</a> ·
+  <a href="#-the-projects-behind-it">The projects</a> ·
+  <a href="docs/guide.md"><b>The guide</b></a>
+</p>
+
+<p align="center">
+  <img src="docs/images/overview.svg" width="100%" alt="The internet reaches the cloud gateway; CrowdSec, Traefik and Authelia check every request; Traefik reaches the home server through a Tailscale tunnel first and a WireGuard tunnel as fallback; your phone uses the VPN for the admin pages">
 </p>
 
 ---
 
 ## 🤔 The problem
 
-You run Home Assistant, a photo library, Nextcloud, maybe Plex, on a machine at home. You
-want to reach them from anywhere, and share some of them with family.
+You run Home Assistant, photos, Nextcloud, maybe Plex at home, and want them from anywhere,
+shared with family. Opening ports puts your home address on every scanner's list (and does not
+work at all behind CGNAT). A VPN app on every phone is safe but nobody in the family uses it.
+A hosted tunnel sends your traffic and your logins through someone else's servers.
 
-The usual answers all hurt somewhere:
-
-- **Open ports on the home router.** Your home address is now on every scanner's list, each
-  app has to defend itself, and with CGNAT or a changing IP it does not work at all.
-- **A VPN app on every phone.** Safe, but your partner will not open a VPN to turn on the
-  lights, and nothing works from a browser on someone else's computer.
-- **A hosted tunnel service.** Easy, but your traffic and your logins go through someone
-  else's servers, and the free tier has limits that you find the day you need it.
-
-What is missing is a **front door you own**: one cheap server with a public address that
-checks who is knocking, bans who should not, and carries the allowed requests home through
-an encrypted tunnel that **your home opens from the inside**.
-
-That is what this is.
+What is missing is a **front door you own**: a cheap server with a public address that checks
+who is knocking, bans who should not, and carries the rest home through tunnels that **your home
+opens from the inside**.
 
 ## ✨ What you get
 
 |  | |
 | :-- | :-- |
-| 🏠 **No open ports at home** | Your home machine dials out to the cloud server. The router stays closed, and CGNAT or a changing IP does not matter. |
-| 🔐 **One login, with 2FA, for everything** | Authelia puts a single sign-on page with a one-time code in front of every app, including apps with no login of their own. |
-| 🛡️ **Scanners banned automatically** | CrowdSec watches the logs and blocks addresses that probe or brute-force, for every site at once, and pulls in a community blocklist. |
-| 🔁 **Two tunnels, automatic failover** | Each service is reached over Tailscale first and WireGuard (or the other way round). If one tunnel goes down, Traefik switches by itself and switches back. |
-| 📱 **A VPN for your own devices** | The same server is your VPN: WireGuard, AmneziaWG or OpenVPN, with a web UI for clients, QR codes, traffic and access rules. |
-| 🖱️ **Managed in a browser** | Routes in Traefik Manager, login rules and users in the Authelia configurator, VPN clients in trapdoor. No YAML editing for day-to-day changes. |
-| 🙈 **Admin pages invisible from the internet** | The admin UIs only answer over the VPN. From the internet they do not exist. |
-| 💸 **Cheap and yours** | A 2 GB cloud VM runs all of it. Open source end to end; your traffic and logins never pass through a third party. |
-
-## 🧩 The parts
-
-Each piece is its own project. Start with the first two and add the others when you need them.
-
-### 🌐 Front door: [Traefik](https://traefik.io/traefik/)
-
-**What it is:** the reverse proxy that answers on ports 80 and 443, gets the Let's Encrypt
-certificates, and decides where each request goes.
-
-**Why you want it:** it is the one place every request passes, so it is where the login
-check, the bans and the routing to your tunnels live. Routes are plain files it reloads by
-itself, and each home service can list two tunnel addresses with a health check, so Traefik
-always uses one that works.
-
-### 🔐 Login and 2FA: [Authelia](https://www.authelia.com/) + [authelia-webui](https://github.com/shuricksumy/authelia-webui)
-
-**What it is:** Authelia is the login portal (password plus one-time code, passkeys, OIDC
-for apps that support it). The **Authelia configurator** from authelia-webui is a web UI for
-the parts that change often: access rules, users, OIDC clients.
-
-**Why you want it:** every app gets the same strong login without touching the app. Rules
-say who may open what, from where: "family may open the photos", "only me, only over the VPN,
-with 2FA, may open the admin pages". The configurator checks each change with Authelia
-itself, keeps a history, and rolls back by itself if Authelia does not come back healthy.
-
-<table>
-  <tr>
-    <td width="50%"><img src="https://raw.githubusercontent.com/shuricksumy/authelia-webui/main/docs/screenshots/rules-1280-light.png" alt="Authelia configurator: access rules with policy badges"><br><sub><b>Access rules</b> in the Authelia configurator: reorder, switch off, test a URL.</sub></td>
-    <td width="50%"><img src="https://raw.githubusercontent.com/shuricksumy/authelia-webui/main/docs/screenshots/apply-applied-1280-dark.png" alt="Authelia configurator: a change applied and Authelia healthy"><br><sub><b>Safe apply:</b> validated, committed, restarted, health-checked, rolled back on failure.</sub></td>
-  </tr>
-</table>
-
-### 🗺️ Routes in a browser: [Traefik Manager](https://github.com/chr0nzz/traefik-manager)
-
-**What it is:** a web UI for Traefik's route files: routers, services, middlewares, and a map
-of how they connect.
-
-**Why you want it:** adding a service becomes a form instead of a YAML edit, with a backup
-before every change. It runs without the Docker socket and only on the VPN, as set up in
-[authelia-webui's guide](https://github.com/shuricksumy/authelia-webui/blob/main/docs/traefik-manager.md).
-
-### 🛡️ Automatic bans: [CrowdSec](https://www.crowdsec.net/)
-
-**What it is:** reads Traefik's and Authelia's logs, recognises attacks (scanners, brute
-force, known CVE probes), and bans the address. A plugin in Traefik enforces the ban on every
-site; an optional firewall bouncer drops the address on every port.
-
-**Why you want it:** a public server is scanned within minutes of going online. CrowdSec
-turns that noise into bans without you reading a single log, and its community blocklist
-stops thousands of known attackers before they try anything. If CrowdSec stops, your sites
-stay up (it fails open).
-
-### 🚇 Tunnels and your VPN: [trapdoor](https://github.com/shuricksumy/trapdoor)
-
-**What it is:** a web UI for your own WireGuard, AmneziaWG and OpenVPN servers: clients, QR
-codes, live sessions, traffic history, access rules, start/stop scripts.
-
-**Why you want it:** it serves two jobs here. Your **home machine** is a WireGuard client of
-it, so Traefik reaches your home services through that tunnel. And your **phones and
-laptops** are clients too, which is how you reach the admin pages that the internet cannot see.
-AmneziaWG gets through networks that block plain VPNs.
-
-<table>
-  <tr>
-    <td width="50%"><img src="https://raw.githubusercontent.com/shuricksumy/trapdoor/main/docs/screenshots/overview.png" alt="trapdoor: overview of a VPN server with today's traffic"><br><sub><b>trapdoor overview:</b> who is connected, today's traffic, what needs attention.</sub></td>
-    <td width="50%"><img src="https://raw.githubusercontent.com/shuricksumy/trapdoor/main/docs/screenshots/clients.png" alt="trapdoor: VPN clients list"><br><sub><b>Clients:</b> one per device; the home server is just another client, with its LAN behind it.</sub></td>
-  </tr>
-</table>
-
-### 🔁 The second tunnel: [Headscale](https://headscale.net/) + [Headplane](https://github.com/tale/headplane) + [Tailscale](https://tailscale.com/)
-
-**What it is:** Headscale is a self-hosted control server for Tailscale clients; Headplane
-is its web UI. A Tailscale node on the cloud server joins the same network as your home machine.
-
-**Why you want it:** a second, independent path home. Tailscale finds a way through almost
-any network on its own. Traefik uses it first and falls back to WireGuard (or the other way
-round), so a broken tunnel is a non-event instead of an outage.
-
-### 🕸️ Optional third path: [ZeroTier](https://www.zerotier.com/) with [ZTNET](https://ztnet.network/)
-
-**What it is:** your own ZeroTier network controller with a web UI.
-
-**Why you want it:** for devices that already speak ZeroTier, or a third route to a second
-site. Same idea as Tailscale: a member on the cloud server, a route through it.
-
-### 🧭 DNS for VPN clients: [AdGuard Home](https://adguard.com/adguard-home/overview.html)
-
-**What it is:** a DNS server with ad blocking and local rewrites.
-
-**Why you want it:** VPN clients ask it for names, so `vpn.example.com` and the other admin
-hosts resolve to the internal address only VPN clients can reach (split DNS). Ads and
-trackers are blocked on every connected phone as a bonus.
-
-### 🏁 One start page: [foyer](https://github.com/shuricksumy/foyer)
-
-**What it is:** a config-driven start page: a sidebar of your services that open in a pane
-next to it.
-
-**Why you want it:** one bookmark for everything, with the admin UIs (trapdoor, the
-configurator, Traefik Manager) shown inside it. They allow being framed only by this page.
+| 🏠 **No open ports at home** | The home server dials out. CGNAT or a changing home IP does not matter. |
+| 🔐 **One login with 2FA for everything** | Authelia in front of every app, also the ones without a login of their own. Rules per group: family sees the photos, only admins see the admin pages. |
+| 🛡️ **Scanners banned automatically** | CrowdSec reads the logs and blocks probing and brute force on every site at once, plus a community blocklist. |
+| 🔁 **Two tunnels, automatic failover** | Each service over Tailscale first, WireGuard when Tailscale is down, and back. No outage when a tunnel drops. |
+| 📱 **A VPN for your devices** | WireGuard / AmneziaWG / OpenVPN with a web UI: clients, QR codes, traffic, access rules. |
+| 🙈 **Admin pages invisible from the internet** | They answer only to VPN clients, behind three locks (network, Authelia, their own login). From the internet they do not exist. |
+| ⚙️ **One profile, one script** | Names, addresses, users and services in `gateway.toml`; `setup.sh` generates every config, secret, hash and key. |
+| 💸 **Cheap and yours** | A 2 GB cloud VM runs all of it. Open source end to end. |
 
 ## 🔗 How it fits together
 
-```mermaid
-flowchart LR
-    subgraph internet["🌍 Internet"]
-        U["👤 Visitors<br/>family, apps"]
-        S["🤖 Scanners"]
-    end
+Three ideas carry the whole design ([the guide](docs/guide.md#2-how-it-works) has the details):
 
-    subgraph vm["☁️ Cloud server · 203.0.113.10"]
-        FW["🧱 Firewall bouncer<br/>banned IPs: DROP"]
-        T["🌐 <b>Traefik</b><br/>:443 public · :8443 VPN-only"]
-        CS["🛡️ <b>CrowdSec</b><br/>reads logs, bans"]
-        A["🔐 <b>Authelia</b><br/>+ configurator"]
-        TM["🗺️ Traefik Manager"]
-        TD["🚇 <b>trapdoor</b><br/>WireGuard · OpenVPN"]
-        TS["🔁 Tailscale node<br/>+ Headscale"]
-        DNS["🧭 AdGuard Home"]
-    end
+1. **One Docker network, fixed addresses.** Traefik and every tunnel endpoint (trapdoor's VPN
+   container, the Tailscale node, ZeroTier) sit on one network, each at a fixed address.
+2. **Routes inside Traefik.** Traefik's container runs a small script that routes each tunnel's
+   range to the container that owns the tunnel. A request for `100.64.0.10` leaves through the
+   Tailscale node, one for `10.66.0.10` through trapdoor.
+3. **NAT on the tunnel's end.** The tunnel container gives Traefik's requests its own tunnel
+   address, so the home server can answer them. VPN clients, the other way round, reach Traefik
+   **without** NAT, so every lock sees their real VPN address.
 
-    subgraph home["🏠 Home · no open ports"]
-        H["🖥️ Home server<br/>HA · photos · Nextcloud"]
-        LAN["📦 LAN devices<br/>192.168.1.0/24"]
-    end
+## 🚀 Quick start
 
-    P["📱 Your phone<br/>VPN client"]
+<p align="center">
+  <img src="docs/images/setup-flow.svg" width="100%" alt="Four steps: describe the gateway in gateway.toml, generate with setup.sh, start with docker compose, bootstrap with setup.sh bootstrap">
+</p>
 
-    U -->|HTTPS| FW --> T
-    S -.->|banned| FW
-    T -->|"every request:<br/>who is it?"| A
-    T -. logs .-> CS
-    A -. logs .-> CS
-    CS -. bans .-> T
-    CS -. bans .-> FW
-    T ==>|"route 100.64.0.0/10<br/>(first choice)"| TS
-    T -->|"route 10.8.10.0/24<br/>(fallback)"| TD
-    TS ==>|Tailscale tunnel| H
-    TD -->|WireGuard tunnel| H
-    H --- LAN
-    P -->|WireGuard| TD
-    P -.->|"admin pages,<br/>DNS"| DNS
-    TD -.->|"VPN clients reach :8443"| T
-    T --- TM
-```
-
-**A request from the internet** (`https://home.example.com`):
-
-1. The firewall bouncer and CrowdSec let it through (the address is not banned).
-2. Traefik asks Authelia: is this visitor signed in, and allowed here? If not, they get the
-   login page with a one-time code.
-3. Traefik sends the request to the home server's **Tailscale** address. If that tunnel's
-   health check fails, it uses the **WireGuard** address instead.
-4. The answer comes back the same way. The home router never accepted a connection.
-
-**An admin page** (`https://vpn.example.com:8443`, trapdoor's UI) works only from a VPN
-client: AdGuard resolves the name to Traefik's internal address, which only VPN clients can
-reach, and Authelia also checks that the request comes from the VPN range. From the internet
-the name does not resolve and the port is closed.
-
-The full picture with every network and address: **[docs/architecture.md](docs/architecture.md)**.
-
-## 🚀 Getting started
-
-**You need:** a cloud VM with a public IPv4 address (2 GB RAM is enough; 1 GB works without
-ZeroTier), a domain whose DNS you control, Docker with the Compose plugin, and a Linux
-machine at home that can run Docker or WireGuard.
-
-Pick your starting point:
-
-| I want to… | Start with |
-| :-- | :-- |
-| understand the design before deploying anything | [docs/architecture.md](docs/architecture.md) |
-| deploy the whole stack, step by step, with a check after each step | [docs/deploy.md](docs/deploy.md) |
-| reach my home services through a tunnel, with failover | [docs/tunnels.md](docs/tunnels.md) |
-| know what is public, what is VPN-only, and why | [docs/security.md](docs/security.md) |
-| keep it running: updates, backups, when something breaks | [docs/operations.md](docs/operations.md) |
-| go deep on Authelia, Traefik Manager or CrowdSec | [authelia-webui docs](https://github.com/shuricksumy/authelia-webui/tree/main/docs) |
-| go deep on the VPN servers | [trapdoor's guide](https://github.com/shuricksumy/trapdoor/blob/main/docs/guide.md) |
-
-**Working compose files** for every part, layered so you can start small and add parts one
-at a time, are in **[`examples/`](examples/)**:
+**You need:** a cloud VM with a public IPv4 address (2 GB RAM), Docker with Compose 2.33+, a
+domain whose DNS you control, and a machine at home that runs Docker or WireGuard.
 
 ```bash
-git clone https://github.com/shuricksumy/homelab-gateway-stack
-cd homelab-gateway-stack/examples
-cp .env.example .env          # your domain, addresses and secrets
-# then follow docs/deploy.md, phase by phase
+git clone https://github.com/shuricksumy/homelab-gateway-stack && cd homelab-gateway-stack/stack
+cp gateway.example.toml gateway.toml     # your domain, IP, users, home services
+sudo ./setup.sh                          # → ../deploy: every config, secret, hash and key
+cd ../deploy && docker compose up -d
+sudo ../stack/setup.sh bootstrap         # first logins, the VPN server, the tunnel keys
 ```
 
-## 💡 Things worth knowing before you start
+`bootstrap` ends with every address and login, and a `home/` folder with the WireGuard config and
+a Tailscale key for your home server. Change the profile and run `setup.sh` again at any time:
+secrets are kept, and the files the web UIs edit (rules, users, your own routes) are left alone.
 
-- **Traffic into a tunnel needs NAT on the tunnel's end.** Traefik's requests come from the
-  Docker network (`172.30.0.x`), and your home machine has no route back there. Masquerade
-  them into the tunnel (one line in trapdoor's start script, [docs/tunnels.md](docs/tunnels.md#nat-into-the-tunnel))
-  or the requests arrive and the answers vanish. The symptom: everything times out, although
-  the tunnel is up.
-- **Pin the addresses on the proxy network.** Traefik's routes point at the tunnel containers
-  by IP. If one of them is recreated without its fixed address, the routes point at nothing.
-  Keep every fixed address in the `.env` of the compose project that uses it.
-- **Tell your apps who the proxy is.** Home Assistant and many others answer
-  **400 Bad Request** when `X-Forwarded-For` comes from an address they do not trust. Trust
-  the tunnel ranges the requests arrive from (`10.8.10.0/24`, `100.64.0.0/10`), not the world.
-- **Admin pages: VPN-only, then Authelia, then their own login.** Three locks, each
-  independent. A mistake in one route does not expose anything.
-- **Some apps cannot sit behind a login page.** Mobile apps (Home Assistant, Nextcloud, Plex)
-  talk to their API directly. Give those hosts a `bypass` or a narrower rule in Authelia and
-  let CrowdSec and the app's own login protect them.
-- **Static Traefik config is read at start only.** Entry points, plugins and the access log
-  need `docker compose up -d --force-recreate traefik`; routes in `traefik/dynamic/` reload
-  by themselves.
-- **Small VM, careful with memory.** Everything here fits in 2 GB. Watch out for log files
-  without rotation and image caches: prune them on a schedule
-  ([docs/operations.md](docs/operations.md)).
+The full walkthrough, every profile option, and what to check after each step:
+**[docs/guide.md](docs/guide.md)**.
+
+## 📸 What it looks like
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/trapdoor-clients.png" alt="trapdoor: the home server and a laptop connected over WireGuard"><br><sub><b>trapdoor:</b> the home server (with its LAN behind it) and a laptop, both connected. Created by <code>setup.sh bootstrap</code>.</sub></td>
+    <td width="50%"><img src="docs/screenshots/authelia-configurator-rules.png" alt="Authelia configurator: access rules"><br><sub><b>Authelia configurator:</b> who may open what, from where, with 2FA. Every change validated and rolled back on failure.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/headplane-machines.png" alt="Headplane: the gateway's Tailscale node connected"><br><sub><b>Headplane:</b> your own tailnet; the gateway's node is the second tunnel's endpoint.</sub></td>
+    <td width="50%"><img src="docs/screenshots/adguard-rewrites.png" alt="AdGuard Home: every gateway name points at Traefik's internal address"><br><sub><b>AdGuard Home:</b> for VPN clients every gateway name points at Traefik's internal address. Generated from the profile.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/foyer.png" alt="foyer start page with the services and the gateway's admin pages"><br><sub><b>foyer:</b> one start page for the services and every admin page, generated from the profile.</sub></td>
+    <td width="50%"><img src="docs/screenshots/trapdoor-overview.png" alt="trapdoor: the WireGuard server's overview"><br><sub><b>trapdoor:</b> the WireGuard server with the AdGuard DNS and the split tunnel (VPN, gateway, home LAN) for every client.</sub></td>
+  </tr>
+</table>
+
+<sub>All screenshots are from a test run of this repository's own `setup.sh` with the example
+profile: placeholder names and addresses only.</sub>
+
+## 🧩 The projects behind it
+
+**Built for this stack** (same author, each usable on its own):
+
+| | |
+| :-- | :-- |
+| 🚇 **[trapdoor](https://github.com/shuricksumy/trapdoor)** | Web UI for your own OpenVPN, WireGuard and AmneziaWG servers: the VPN and the WireGuard tunnel home. Successor to [openvpn-ui](https://github.com/shuricksumy/openvpn-ui). |
+| 🔐 **[authelia-webui](https://github.com/shuricksumy/authelia-webui)** | The Authelia configurator: access rules, users and OIDC clients in a browser, with safe apply. Its docs cover Traefik Manager, CrowdSec, blocklists and hardening in depth. |
+| 🏁 **[foyer](https://github.com/shuricksumy/foyer)** | The start page: a sidebar of your services, opening in a pane next to it. |
+| 🏡 **[home-assistant-apps](https://github.com/shuricksumy/home-assistant-apps)** | Puts services that run on other machines back into the Home Assistant sidebar. |
+| 🎶 **[home-audio-stack](https://github.com/shuricksumy/home-audio-stack)** | An example of what lives behind the gateway: multiroom Hi-Fi with Music Assistant. |
+| 🔄 **[renovate-config](https://github.com/shuricksumy/renovate-config)** | Shared Renovate presets: keeps pinned image versions like the ones here up to date. |
+
+**Open-source projects it is made of:** [Traefik](https://traefik.io/traefik/),
+[Authelia](https://www.authelia.com/), [CrowdSec](https://www.crowdsec.net/),
+[Traefik Manager](https://github.com/chr0nzz/traefik-manager), [Headscale](https://headscale.net/),
+[Headplane](https://github.com/tale/headplane), [Tailscale](https://tailscale.com/),
+[AdGuard Home](https://adguard.com/adguard-home/overview.html), [ZeroTier](https://www.zerotier.com/)
+with [ZTNET](https://ztnet.network/).
+
+## 💡 Worth knowing before you start
+
+- **Admin pages need the VPN first.** `bootstrap` makes a WireGuard client for your first device
+  (`deploy/clients/<you>-device.conf`): import it in the WireGuard app, and every admin page
+  opens by name.
+- **Apps behind a proxy want to know it.** Home Assistant and Nextcloud answer *400 Bad Request*
+  until they trust the tunnel ranges. `deploy/home/README.md` has the lines.
+- **Mobile apps cannot pass a login page.** Services like Home Assistant get `login = false` in the
+  profile and rely on their own login, 2FA and CrowdSec.
 
 ---
 

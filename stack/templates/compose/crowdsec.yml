@@ -1,0 +1,35 @@
+# CrowdSec: bans addresses that probe or brute-force; Traefik's bouncer plugin enforces the
+# bans on every public site. Fails open: CrowdSec down, sites stay up. Background:
+# authelia-webui's docs/hardening.md.
+networks:
+  crowdsec: {}
+
+services:
+  crowdsec:
+    logging:
+      driver: json-file
+      options: {max-size: "15m", max-file: "3"}
+    image: crowdsecurity/crowdsec:${CROWDSEC_VERSION}
+    restart: unless-stopped
+    cap_drop: [ALL]
+    cap_add: [DAC_READ_SEARCH] # read logs owned by other users; mounts are read-only
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      TZ: ${TZ}
+      COLLECTIONS: >-
+        crowdsecurity/traefik crowdsecurity/http-cve crowdsecurity/base-http-scenarios
+        LePresidente/authelia crowdsecurity/whitelist-good-actors
+      PARSERS: crowdsecurity/whitelists crowdsecurity/geoip-enrich
+      CONTEXTS: crowdsecurity/http_base
+      BOUNCER_KEY_traefik: ${CROWDSEC_BOUNCER_KEY}
+    volumes:
+      - ./crowdsec/acquis.yaml:/etc/crowdsec/acquis.yaml:ro
+      - ./data/crowdsec/config:/etc/crowdsec
+      - ./data/crowdsec/data:/var/lib/crowdsec/data
+      - ./data/logs/traefik:/var/log/traefik:ro
+      - ./authelia/logs:/var/log/authelia:ro
+    networks: [crowdsec]
+
+  traefik:
+    networks: [crowdsec]
+    depends_on: [crowdsec]

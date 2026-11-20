@@ -1,0 +1,55 @@
+# The second tunnel: Headscale (your own Tailscale control server), Headplane (its web UI) and
+# this server's Tailscale node, which keeps its NAT rule in place itself (tunnel-nat.sh).
+x-logging: &logging
+  logging:
+    driver: json-file
+    options: {max-size: "15m", max-file: "3"}
+
+services:
+  headscale:
+    <<: *logging
+    image: headscale/headscale:${HEADSCALE_VERSION}
+    restart: unless-stopped
+    command: ["serve"]
+    volumes:
+      - ./headscale/config.yaml:/etc/headscale/config.yaml:ro
+      - ./data/headscale:/var/lib/headscale
+    networks: [edge]
+
+  headplane:
+    <<: *logging
+    image: ghcr.io/tale/headplane:${HEADPLANE_VERSION}
+    restart: unless-stopped
+    volumes:
+      - ./headplane/config.yaml:/etc/headplane/config.yaml:ro
+      - ./headscale/config.yaml:/etc/headscale/config.yaml:ro
+      - ./data/headplane:/var/lib/headplane
+    networks: [edge]
+    depends_on: [headscale]
+
+  tailscale: # this server's node: Traefik's route to the tailnet goes through it
+    <<: *logging
+    image: tailscale/tailscale:${TAILSCALE_VERSION}
+    hostname: gateway
+    restart: unless-stopped
+    cap_add: [NET_ADMIN, NET_RAW]
+    devices: [/dev/net/tun]
+    entrypoint: ["/bin/sh", "/scripts/tunnel-nat.sh", "/usr/local/bin/containerboot"]
+    sysctls:
+      net.ipv4.ip_forward: "1"
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY} # set by setup.sh bootstrap; only used for the first login
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "false" # a real tailscale0 interface, so it can route for Traefik
+      TS_ACCEPT_DNS: "false"
+      # Headscale on the edge network directly: no trip out to the public address and back.
+      TS_EXTRA_ARGS: --login-server=http://headscale:8080
+      NAT_FROM: ${EDGE_SUBNET}
+      NAT_IFACE: tailscale0
+    volumes:
+      - ./data/tailscale:/var/lib/tailscale
+      - ./scripts/tunnel-nat.sh:/scripts/tunnel-nat.sh:ro
+    networks:
+      edge:
+        ipv4_address: ${IP_TAILSCALE}
+    depends_on: [headscale]

@@ -1,0 +1,72 @@
+# Optional third path: your own ZeroTier controller (ZTNET web UI + PostgreSQL). The controller
+# also joins its network, so Traefik can route the ZeroTier range through it.
+networks:
+  ztnet:
+    ipam:
+      config:
+        - subnet: 172.31.255.0/29
+
+x-logging: &logging
+  logging:
+    driver: json-file
+    options: {max-size: "15m", max-file: "3"}
+
+services:
+  ztnet-postgres:
+    <<: *logging
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ztnet
+      POSTGRES_PASSWORD: ${ZTNET_POSTGRES_PASSWORD}
+      POSTGRES_DB: ztnet
+    volumes:
+      - ./data/zerotier/postgres:/var/lib/postgresql/data
+    networks: [ztnet]
+
+  zerotier:
+    <<: *logging
+    image: zyclonite/zerotier:router-${ZEROTIER_VERSION} # the variant with iptables
+    hostname: zerotier
+    restart: unless-stopped
+    cap_add: [NET_ADMIN, SYS_ADMIN]
+    devices: [/dev/net/tun]
+    entrypoint: ["/bin/sh", "/scripts/tunnel-nat.sh", "entrypoint.sh", "-U"]
+    sysctls:
+      net.ipv4.ip_forward: "1"
+    environment:
+      ZT_OVERRIDE_LOCAL_CONF: "true"
+      ZT_ALLOW_MANAGEMENT_FROM: 172.31.255.0/29
+      NAT_FROM: ${EDGE_SUBNET}
+      NAT_IFACE: zt+
+    ports:
+      - "9993:9993/udp"
+    volumes:
+      - ./data/zerotier/zerotier-one:/var/lib/zerotier-one
+      - ./scripts/tunnel-nat.sh:/scripts/tunnel-nat.sh:ro
+    networks:
+      ztnet:
+        ipv4_address: 172.31.255.1
+      edge:
+        ipv4_address: ${IP_ZEROTIER}
+
+  ztnet:
+    <<: *logging
+    image: sinamics/ztnet:${ZTNET_VERSION}
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: ztnet-postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ztnet
+      POSTGRES_PASSWORD: ${ZTNET_POSTGRES_PASSWORD}
+      POSTGRES_DB: ztnet
+      NEXTAUTH_URL: https://${HOST_ZTNET}:8443
+      NEXTAUTH_URL_INTERNAL: http://ztnet:3000
+      NEXTAUTH_SECRET: ${ZTNET_NEXTAUTH_SECRET}
+    volumes:
+      - ./data/zerotier/zerotier-one:/var/lib/zerotier-one
+    networks:
+      ztnet:
+        ipv4_address: 172.31.255.2
+      edge: {}
+    depends_on: [ztnet-postgres, zerotier]

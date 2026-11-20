@@ -1,0 +1,23 @@
+# AdGuard Home: DNS for VPN clients (the admin names point at Traefik's internal address),
+# ad blocking. Its configuration is generated once (data/adguard/conf); after that it is
+# AdGuard's own, edited in its web UI.
+services:
+  adguard:
+    logging:
+      driver: json-file
+      options: {max-size: "15m", max-file: "3"}
+    image: adguard/adguardhome:${ADGUARD_VERSION}
+    restart: unless-stopped
+    # VPN clients ask it directly (no NAT), so it needs the same routes back into the tunnels as
+    # Traefik: routes.sh every 30 s, then AdGuard Home as usual. NET_ADMIN for exactly this.
+    cap_add: [NET_ADMIN]
+    environment:
+      ROUTES: ${TUNNEL_ROUTES}
+    entrypoint: ["/bin/sh", "-c", "while :; do sh /routes.sh; sleep 30; done & exec /opt/adguardhome/AdGuardHome --no-check-update -c /opt/adguardhome/conf/AdGuardHome.yaml -w /opt/adguardhome/work"]
+    volumes:
+      - ./data/adguard/work:/opt/adguardhome/work
+      - ./data/adguard/conf:/opt/adguardhome/conf
+      - ./traefik/routes.sh:/routes.sh:ro
+    networks:
+      edge:
+        ipv4_address: ${IP_ADGUARD}

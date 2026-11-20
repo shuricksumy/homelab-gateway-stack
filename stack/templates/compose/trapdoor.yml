@@ -1,0 +1,93 @@
+# trapdoor (github.com/shuricksumy/trapdoor): the VPN for your devices, and the WireGuard
+# tunnel the home server dials in through. The web UI is VPN-only (Traefik, internal entry
+# point); `setup.sh bootstrap` creates its admin, the WireGuard server and the home client.
+x-trapdoor: &trapdoor
+  image: ghcr.io/shuricksumy/trapdoor:${TRAPDOOR_VERSION}
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: {max-size: "15m", max-file: "3"}
+
+services:
+  trapdoor-vpn:
+    <<: *trapdoor
+    user: root
+    entrypoint: ["vpn-entrypoint.sh"]
+    cap_add: [NET_ADMIN]
+    devices: [/dev/net/tun]
+    sysctls:
+      - net.ipv4.ip_forward=1
+    environment:
+      VPN_NAT_SUBNET: auto # VPN clients reach the internet through the default network
+    ports:
+      - "${WG_PORT}:${WG_PORT}/udp"
+    volumes:
+      - ./data/trapdoor/openvpn:/etc/openvpn
+      - ./data/trapdoor/wireguard:/etc/wireguard # also wg0.up.sh / wg0.down.sh: NAT into the tunnel
+      - ./data/trapdoor/amneziawg:/etc/amnezia/amneziawg
+    networks:
+      default:
+        gw_priority: 1 # the internet leaves here, not through the edge network (Compose 2.33+)
+      edge:
+        ipv4_address: ${IP_TRAPDOOR} # Traefik's routes into the VPN point here
+
+  trapdoor-agent:
+    <<: *trapdoor
+    user: root
+    command: ["agent"]
+    network_mode: service:trapdoor-vpn
+    depends_on: [trapdoor-vpn]
+    environment:
+      TD_AGENT_TOKEN: ${TD_AGENT_TOKEN}
+      TD_AGENT_LISTEN: unix:/run/trapdoor/agent.sock
+      TD_AGENT_SOCKET_GID: "10001"
+      TD_OPENVPN_MGMT: 127.0.0.1:2080
+      TD_OPENVPN_RESTART: SIGTERM
+      TD_FIREWALL: file
+      TD_WIREGUARD: file
+      TD_SCRIPTS: "off" # "on": the start / stop scripts become editable in the web UI
+      TD_CONTAINER_OPENVPN: trapdoor-vpn
+      TD_CONTAINER_WIREGUARD: trapdoor-vpn
+      TD_CONTAINER_AMNEZIAWG: trapdoor-vpn
+      TD_MACHINE: gateway
+      TD_NODE_NAME: gateway
+    volumes:
+      - ./data/trapdoor/openvpn:/etc/openvpn
+      - ./data/trapdoor/wireguard:/etc/wireguard
+      - ./data/trapdoor/amneziawg:/etc/amnezia/amneziawg
+      - trapdoor-run:/run/trapdoor
+    healthcheck:
+      test: ["CMD", "trapdoor", "health", "unix:/run/trapdoor/agent.sock"]
+      interval: 30s
+      timeout: 5s
+      start_period: 5s
+
+  trapdoor-web:
+    <<: *trapdoor
+    command: ["web"]
+    depends_on: [trapdoor-agent]
+    environment:
+      TD_AGENT_TOKEN: ${TD_AGENT_TOKEN}
+      TD_AGENT_URL: unix:/run/trapdoor/agent.sock
+      TD_TZ: ${TZ}
+      TD_COOKIE_SECURE: "true"
+      TD_TRUSTED_PROXIES: ${IP_TRAEFIK}/32 # only Traefik may set X-Forwarded-For
+      TD_PUBLIC_URL: https://${HOST_TRAPDOOR}:8443
+      TD_FRAME_ANCESTORS: ${FRAME_ANCESTORS} # shown inside the start page
+      TD_WEB_API_TOKEN: ${TD_WEB_API_TOKEN} # used by setup.sh bootstrap
+      TD_BACKUP_PASSPHRASE: ${TD_BACKUP_PASSPHRASE}
+    volumes:
+      - ./data/trapdoor/web:/data # uid 10001
+      - trapdoor-run:/run/trapdoor
+    networks: [edge]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "trapdoor", "health", "http://127.0.0.1:8080"]
+      interval: 30s
+      timeout: 5s
+      start_period: 5s
+
+volumes:
+  trapdoor-run: {}

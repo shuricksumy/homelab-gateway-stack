@@ -1,0 +1,57 @@
+# Keeps the stack deployable: the generator runs on the example profile, Authelia validates what
+# it wrote, every compose combination parses, the scripts pass shellcheck, the docs' links work.
+name: Check
+
+on:
+  push: {branches: [main]}
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with: {persist-credentials: false}
+      - name: Generate from the example profile (every part on)
+        working-directory: stack
+        run: |
+          sed -e 's/^challenge    = "dns"/challenge    = "none"/' -e 's/^zerotier        = false/zerotier        = true/' \
+            gateway.example.toml > gateway.toml
+          sudo ./setup.sh
+      - name: Validate (docker compose config, Authelia validate-config)
+        working-directory: stack
+        run: sudo ./setup.sh check
+      - name: Every part on its own
+        working-directory: deploy
+        run: |
+          for part in trapdoor headscale crowdsec traefik-manager adguard foyer zerotier; do
+            echo "== core + $part"
+            sudo env COMPOSE_FILE=compose.core.yml:compose.$part.yml docker compose config -q
+          done
+      - name: Shell scripts
+        run: shellcheck stack/setup.sh stack/templates/scripts/*.sh
+
+  links:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with: {persist-credentials: false}
+      - name: Relative links and images point at files that exist
+        run: |
+          python3 - <<'PY'
+          import re, os, glob, sys
+          bad = 0
+          for f in glob.glob('**/*.md', recursive=True):
+              text = open(f).read()
+              for u in re.findall(r'\]\(([^)\s]+)\)', text) + re.findall(r'src="([^"]+)"', text):
+                  if u.startswith(('http', '#', 'mailto')):
+                      continue
+                  p = os.path.normpath(os.path.join(os.path.dirname(f), u.split('#')[0]))
+                  if not os.path.exists(p):
+                      print(f"{f}: broken link {u}")
+                      bad += 1
+          sys.exit(1 if bad else 0)
+          PY

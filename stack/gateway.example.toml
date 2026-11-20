@@ -1,0 +1,102 @@
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+#  Homelab gateway profile. Copy to gateway.toml (gitignored), fill in, then: ./setup.sh
+#  Every value below is a placeholder; replace them with yours.
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+
+[gateway]
+domain    = "example.com"        # your services become <name>.example.com
+public_ip = "203.0.113.10"       # the cloud server's public IPv4 address
+email     = "you@example.com"    # Let's Encrypt account; sender of Authelia's emails
+timezone  = "UTC"
+# http_port  = 80                # change only for a test on a machine where 80/443 are taken
+# https_port = 443
+
+[certificates]
+# dns:  one token, certificates for every name, including the VPN-only ones (recommended)
+# http: no token; only the public names get certificates
+# none: self-signed (a local test)
+challenge    = "dns"
+dns_provider = "cloudflare"      # Traefik's provider name (doc.traefik.io → ACME → providers)
+dns_env      = { CF_DNS_API_TOKEN = "" }   # the variable(s) that provider needs
+staging      = false             # true: Let's Encrypt's test CA while you experiment
+
+[parts]                          # what runs; Traefik and Authelia always do
+trapdoor        = true           # VPN for your devices + the WireGuard tunnel home
+headscale       = true           # the second tunnel (Tailscale), with failover
+crowdsec        = true           # automatic bans
+traefik_manager = true           # routes in a browser
+adguard         = true           # DNS for VPN clients (the VPN-only names), ad blocking
+foyer           = true           # start page
+zerotier        = false          # optional third path (+300 MB RAM)
+
+[hosts]                          # names under the domain; these are the defaults
+login     = "auth"               # public: the login portal
+headscale = "headscale"          # public: Tailscale clients talk to it
+access    = "access"             # VPN-only: Authelia configurator (rules, users)
+trapdoor  = "trapdoor"           # VPN-only: trapdoor
+traefik   = "traefik"            # VPN-only: Traefik Manager
+adguard   = "adguard"            # VPN-only: AdGuard Home
+start     = "start"              # VPN-only: the start page
+ztnet     = "ztnet"              # VPN-only: ZeroTier controller
+
+[network]
+edge           = "172.28.0.0/24" # Docker network for Traefik and the tunnel endpoints
+wireguard      = "10.66.0.0/24"  # trapdoor's WireGuard range
+wireguard_port = 51820           # UDP, open it in the cloud firewall
+tailscale      = "100.64.0.0/10" # Headscale's range
+zerotier       = "10.147.17.0/24"
+home_lan       = "192.168.1.0/24" # devices behind the home server ("" for none)
+
+[home]                           # the home server's addresses in the tunnels
+wireguard = "10.66.0.10"         # setup.sh bootstrap creates this trapdoor client
+tailscale = "100.64.0.10"        # check with: docker compose exec headscale headscale nodes list
+
+# ── People ── the first user in "admins" also becomes the admin of trapdoor and AdGuard.
+[[users]]
+name         = "you"
+display_name = "You"
+email        = "you@example.com"
+groups       = ["admins"]
+password     = ""                # empty: generated, shown once by bootstrap, kept in deploy/secrets.env
+
+[[users]]
+name   = "family"
+email  = "family@example.com"
+groups = ["family"]
+
+# ── Your home services ── each becomes https://<host>.example.com, through the tunnels.
+[[services]]
+name   = "homeassistant"
+title  = "Home Assistant"
+port   = 8123
+health = "/manifest.json"        # a path that answers 200 without a login
+login  = false                   # the HA apps cannot pass a login page; HA's own login + CrowdSec
+icon   = "home-assistant"
+
+[[services]]
+name   = "photos"
+title  = "Photos"
+port   = 2283
+health = "/api/server/ping"
+groups = ["admins", "family"]    # who may open it (Authelia, with 2FA)
+icon   = "immich"
+
+[[services]]
+name    = "router"
+title   = "Home router"
+port    = 80
+address = "192.168.1.1"          # a device on the home LAN (needs home_lan above)
+public  = false                  # VPN-only
+icon    = "router-wireless"
+
+# Other keys of a service: host (default: name), scheme ("http"), tailscale / wireguard
+# (default: [home]), prefer ("tailscale" or "wireguard").
+
+# [smtp]                         # optional: Authelia's emails (2FA registration, resets)
+# address  = "submissions://smtp.example.com:465"
+# username = "gateway@example.com"
+# password = ""
+# sender   = "Gateway <gateway@example.com>"
+
+# [versions]                     # optional: override a pinned image version
+# trapdoor = "0.4"

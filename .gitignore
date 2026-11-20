@@ -1,5 +1,4 @@
-# Written when you run the example stack: secrets, state, certificates, logs.
-examples/.env
-examples/data/
-examples/**/*.key
-examples/letsencrypt/
+# Your profile and everything generated from it: secrets, state, certificates, logs.
+stack/gateway.toml
+deploy/
+*.key

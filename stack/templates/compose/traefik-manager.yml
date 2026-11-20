@@ -1,0 +1,33 @@
+# Traefik Manager (github.com/chr0nzz/traefik-manager): routes in a browser. Edits
+# traefik/dynamic/services.yml only; reads Traefik's API on the unpublished tmapi entry point;
+# no Docker socket. Setup notes: authelia-webui's docs/traefik-manager.md.
+services:
+  traefik-manager:
+    logging:
+      driver: json-file
+      options: {max-size: "15m", max-file: "3"}
+    image: ghcr.io/chr0nzz/traefik-manager:${TRAEFIK_MANAGER_VERSION}
+    restart: unless-stopped
+    user: "1000:1000"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      TRAEFIK_API_URL: http://${IP_TRAEFIK}:8081 # an address, not a name: allow-listed by IP
+      CONFIG_PATH: /app/dynamic/services.yml
+      DOMAINS: ${DOMAIN}
+      CERT_RESOLVER: le
+      COOKIE_SECURE: "true"
+      TRUSTED_PROXIES: ${IP_TRAEFIK}/32
+      TZ: ${TZ}
+    volumes:
+      - ./traefik/dynamic:/app/dynamic
+      - ./data/traefik-manager/config:/app/config
+      - ./data/traefik-manager/backups:/app/backups
+      - ./data/traefik-manager/vendor/dagre.min.js:/app/static/vendor/dagre.min.js:ro
+      - ./data/traefik-manager/vendor/qrcode.min.js:/app/static/vendor/qrcode.min.js:ro
+    networks:
+      edge:
+        ipv4_address: ${IP_TRAEFIK_MANAGER}
+    depends_on: [traefik]

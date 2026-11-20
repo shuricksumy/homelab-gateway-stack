@@ -1,0 +1,16 @@
+# foyer (github.com/shuricksumy/foyer): the start page. setup.sh puts a pinned checkout in
+# data/foyer; only the files the page needs are mounted, never .git.
+services:
+  foyer:
+    logging:
+      driver: json-file
+      options: {max-size: "15m", max-file: "3"}
+    image: nginx:${NGINX_VERSION}
+    restart: unless-stopped
+    volumes:
+      - ./data/foyer/index.html:/usr/share/nginx/html/index.html:ro
+      - ./data/foyer/css:/usr/share/nginx/html/css:ro
+      - ./data/foyer/js:/usr/share/nginx/html/js:ro
+      - ./data/foyer/icons:/usr/share/nginx/html/icons:ro
+      - ./foyer/config.yaml:/usr/share/nginx/html/config.yaml:ro
+    networks: [edge]
